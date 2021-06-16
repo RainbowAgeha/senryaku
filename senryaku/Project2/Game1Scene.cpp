@@ -53,7 +53,7 @@ enum GameModeList {
 	gamemode_playerUnitchoice,	//ユニットを選択している状態
 	gamemode_playerMenuchoice,	//適当な場所を選択し、メニューを開いている状態
 	gamemode_playerUnitmoveChoice,	//ユニットの移動先を選択している状態
-
+	gamemode_playerUnitAttackChoice,	//ユニットの攻撃先を選択している状態
 	gamemode_enemyturn,		//エネミーターン
 
 	gamemode_result
@@ -68,8 +68,8 @@ int TerrainMapData[MapSizeX][MapSizeY];
 //イベントマップ配列　
 int EventMapData[MapSizeX][MapSizeY];
 
-//移動できる範囲を保存する配列
-int MoveCheckData[MapSizeX][MapSizeY];
+//移動や攻撃など色々できる範囲を保存する配列
+int MapCheckData[MapSizeX][MapSizeY];
 
 #define UnitNum 10
 //ユニット構造体配列
@@ -83,7 +83,12 @@ struct UnitStatus {
 	int atk;
 	int def;
 	int MovePower;		//移動出来る量
+	int AttackLength;
 }unitdata[UnitNum];
+
+//プレイヤーが選択しているユニット番号の保存変数
+//何も選択していない状態は -1
+int PlayerChoiceUnit;
 
 enum {
 	Unit_Null = 0,
@@ -106,13 +111,15 @@ int DelayTime = 0;
 //-ユーザ関数群-------------------------------------
 
 //指定した場所にコマが置かれているか検索する
-//0 コマがなかった、1コマがあった
-int PieceCheck(int _x, int _y);
+//retuen -1 コマがなかった、0以上 当たったコマ管理番号を返す
+int PieceCheck(int _x, int _y, int _UnitType);
 
 //コマの移動範囲を検索、MoveCheckDataに移動出来る範囲を代入する
 //
 int PieceMoveCheck(int _x, int _y,int _movePower);
 
+//探索範囲を全部初期化する
+void MapCheckReset();
 
 //--------------------------------------
 
@@ -124,7 +131,7 @@ BOOL initGame1Scene(void) {
 		for (int j = 0; j < MapSizeY; j++) {
 			TerrainMapData[i][j] = Terrain_none;
 			EventMapData[i][j] = 0;
-			MoveCheckData[i][j] = 0;
+			MapCheckData[i][j] = 0;
 		}
 	}
 
@@ -145,6 +152,7 @@ BOOL initGame1Scene(void) {
 		unitdata[i].atk = 0;
 		unitdata[i].def = 0;
 		unitdata[i].MovePower = 0;
+		unitdata[i].AttackLength = 0;
 	}
 
 	//プレイヤーの設定
@@ -158,6 +166,7 @@ BOOL initGame1Scene(void) {
 	unitdata[0].atk = 2;
 	unitdata[0].def = 2;
 	unitdata[0].MovePower = 5;
+	unitdata[0].AttackLength = 3;
 
 	//敵の設定
 	//敵は右上が初期位置
@@ -169,6 +178,8 @@ BOOL initGame1Scene(void) {
 	unitdata[1].Hp = 10;
 	unitdata[1].atk = 2;
 	unitdata[1].def = 2;
+	unitdata[1].MovePower = 5;
+	unitdata[0].AttackLength = 3;
 
 	//画像の読み込み
 	Img_mapGrass = LoadGraph("res/map_grass.png");
@@ -181,6 +192,9 @@ BOOL initGame1Scene(void) {
 
 	img_Arrrowcursol = LoadGraph("res/ArrowCursol.png");
 	MenuChoice = 0;
+
+	//何も選択していない状態は-1
+	PlayerChoiceUnit = -1;
 
 	//ゲームモード
 	GameMode = gamemode_playerturn;
@@ -214,7 +228,10 @@ void moveGame1Scene() {
 			MenuChoice = 0;	
 
 			//プレイヤーのユニットの選択したかどうかで判定を変える
-			if (PieceCheck(cursol_x, cursol_y) == 1) {
+			if (PieceCheck(cursol_x, cursol_y,Unit_Player) >= 0) {
+				//現在選択しているユニット番号を保存しておく
+				PlayerChoiceUnit = PieceCheck(cursol_x, cursol_y, Unit_Player);
+				//プレイヤーコマの選択中
 				GameMode = gamemode_playerUnitchoice;
 			}
 			else {
@@ -240,18 +257,19 @@ void moveGame1Scene() {
 			switch (MenuChoice) {
 			case 0: //移動モード
 
-				//探索範囲を全部初期化する
-				for (int i = 0; i < MapSizeX; i++) {
-					for (int j = 0; j < MapSizeY; j++) {
-						MoveCheckData[i][j] = 0;
-					}
-				}
+				MapCheckReset();
 				//移動範囲を検索する処理を呼び出す
-				PieceMoveCheck(unitdata[0].posx, unitdata[0].posy,unitdata[0].MovePower);
+				PieceMoveCheck(unitdata[PlayerChoiceUnit].posx, unitdata[PlayerChoiceUnit].posy,unitdata[PlayerChoiceUnit].MovePower);
 				//移動選択モードに切り替える
 				GameMode = gamemode_playerUnitmoveChoice;
 				break;
 			case 1: //攻撃モード
+				//探索範囲を全部初期化する
+				MapCheckReset();
+				//攻撃範囲を検索する処理を呼び出す
+				PieceMoveCheck(unitdata[PlayerChoiceUnit].posx, unitdata[PlayerChoiceUnit].posy, unitdata[PlayerChoiceUnit].AttackLength);
+				//攻撃選択モードに切り替える
+				GameMode = gamemode_playerUnitAttackChoice;
 				break;
 			case 2: //待機モード
 				break;
@@ -278,7 +296,7 @@ void moveGame1Scene() {
 			switch (MenuChoice) {
 			case 0: //ターンエンド
 				GameMode = gamemode_enemyturn;
-				DelayTime = 180;
+				DelayTime = 60;
 				break;
 			case 1: //戦績確認モード　まだ何もない
 				break;
@@ -311,16 +329,58 @@ void moveGame1Scene() {
 
 		//移動できる範囲を選択した場所に瞬間移動する
 		if ((EdgeInput & PAD_INPUT_1)) {
-			if (MoveCheckData[cursol_x][cursol_y] == 1) {
+			if (MapCheckData[cursol_x][cursol_y] == 1) {
 				//押した場所が移動できる場所ならプレイヤーの位置をそこまで移動する
-				unitdata[0].posx = cursol_x;
-				unitdata[0].posy = cursol_y;
+				//TODO:目的地にたどり着くまで移動アニメーションを行うほうが良い。
+				unitdata[PlayerChoiceUnit].posx = cursol_x;
+				unitdata[PlayerChoiceUnit].posy = cursol_y;
 
 				//移動したので、このユニットは終了する
-				unitdata[0].EndFlag = 1;
+				unitdata[PlayerChoiceUnit].EndFlag = 1;
+				//ユニットは選択していない状態にする
+				PlayerChoiceUnit = -1;
 
 				//選択できるユニットがいなくてもとりあえずプレイヤーのターンへ。
 				GameMode = gamemode_playerturn;
+			}
+		}
+
+		break;
+	case gamemode_playerUnitAttackChoice:
+
+		//カーソルを動かす
+		if ((EdgeInput & PAD_INPUT_UP)) {
+			if (cursol_y > 0)cursol_y -= 1;
+		}
+		if ((EdgeInput & PAD_INPUT_DOWN)) {
+			if (cursol_y < MapSizeY - 1)cursol_y += 1;
+		}
+		if ((EdgeInput & PAD_INPUT_RIGHT)) {
+			if (cursol_x < MapSizeX - 1)cursol_x += 1;
+		}
+		if ((EdgeInput & PAD_INPUT_LEFT)) {
+			if (cursol_x > 0)cursol_x -= 1;
+		}
+
+		//攻撃出来る場所にユニットがいた場合、攻撃する
+		if ((EdgeInput & PAD_INPUT_1)) {
+			if (MapCheckData[cursol_x][cursol_y] == 1) {
+				//その場所にユニットがいれば攻撃する
+				if (PieceCheck(cursol_x, cursol_y, Unit_Enemy) >= 0) {
+					//選択したユニット番号を取得しておく
+					int UnitNo = PieceCheck(cursol_x, cursol_y, Unit_Enemy);
+					
+					//攻撃するユニットの体力を減らす
+					unitdata[UnitNo].Hp -= 1;
+
+					//攻撃したので、このユニットは終了する
+					unitdata[PlayerChoiceUnit].EndFlag = 1;
+					//ユニットは選択していない状態にする
+					PlayerChoiceUnit = -1;
+
+					//選択できるユニットがいなくてもとりあえずプレイヤーのターンへ。
+					GameMode = gamemode_playerturn;
+				}
 			}
 		}
 
@@ -387,6 +447,7 @@ void renderGame1Scene(void){
 			else {
 				//灰色に
 				DrawFormatString(BaseX + unitdata[i].posx * ImgSize, BaseY + unitdata[i].posy * ImgSize, GetColor(128, 128, 128), "◆");
+
 			}
 		}
 
@@ -394,6 +455,9 @@ void renderGame1Scene(void){
 			//敵の描画処理
 			DrawFormatString(BaseX + unitdata[i].posx * ImgSize, BaseY + unitdata[i].posy * ImgSize, Cr_Blue, "◆");
 		}
+
+		//デバック用にHPを表示する
+		DrawFormatString(BaseX + unitdata[i].posx * ImgSize, BaseY + unitdata[i].posy * ImgSize, Cr_White, "%d", unitdata[i].Hp);
 	}
 
 	//カーソルの表示
@@ -431,7 +495,7 @@ void renderGame1Scene(void){
 		//移動できるマップを表示する
 		for (int i = 0; i < MapSizeX; i++) {
 			for (int j = 0; j < MapSizeY; j++) {
-				if(MoveCheckData[i][j] == 1){
+				if(MapCheckData[i][j] == 1){
 					DrawFormatString(BaseX + i * ImgSize, BaseY + j * ImgSize, Cr_Green, "□");
 				}
 			}
@@ -466,7 +530,7 @@ void  Game1SceneCollideCallback(int nSrc, int nTarget, int nCollideID) {
 }
 
 
-int PieceCheck(int _x, int _y) {
+int PieceCheck(int _x, int _y,int _UnitType) {
 	//生きているユニット分だけ検索を回す
 	for (int i = 0; i < UnitNum; i++) {
 		if (unitdata[i].isDead == 1)continue;
@@ -474,30 +538,30 @@ int PieceCheck(int _x, int _y) {
 		if (unitdata[i].posx == _x && unitdata[i].posy == _y){
 			//指定したマスにいるユニットが終了している場合選択できない
 			if (unitdata[i].EndFlag == 0) {
-				//なおかつ、プレイヤーかどうか
-				if (unitdata[i].UnitID == Unit_Player) {
-					return 1;
+				//なおかつ、指定したユニットタイプだったかどうか
+				if (unitdata[i].UnitID == _UnitType) {
+					return i;	//当たったコマ管理番号を返す
 				}
 			}
 		}
 	}
 	
-	//検索しても当たらなかったので0を返す
-	return 0;
+	//検索しても当たらなかったので-1を返す
+	return -1;
 }
 
 int PieceMoveCheck(int _x, int _y, int _movePower){
 	//フィールド外は無視
 	if (_x < 0 || _x >= MapSizeX || _y < 0 || _y >= MapSizeY)return 0;
 	//チェック済みは無視
-	if(MoveCheckData[_x][_y] == 1) return 0;
+	if(MapCheckData[_x][_y] == 1) return 0;
 	//移動できないブロックだった場合も無視
 	if (TerrainMapData[_x][_y] != 0)return 0;
 	//移動歩数が0だった場合も無視
 	if (_movePower <= 0)return 0;
 
 	//ここまで来たという事は今参照しているマスは移動できるマスであることがわかる
-	MoveCheckData[_x][_y] = 1;
+	MapCheckData[_x][_y] = 1;
 
 	//現在のマスから上下左右にチェックする
 	return 1 +
@@ -506,4 +570,12 @@ int PieceMoveCheck(int _x, int _y, int _movePower){
 		PieceMoveCheck(_x, _y + 1, _movePower - 1) +
 		PieceMoveCheck(_x, _y - 1, _movePower - 1);
 
+}
+
+void MapCheckReset() {
+	for (int i = 0; i < MapSizeX; i++) {
+		for (int j = 0; j < MapSizeY; j++) {
+			MapCheckData[i][j] = 0;
+		}
+	}
 }
