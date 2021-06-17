@@ -172,8 +172,12 @@ BOOL initGame1Scene(void) {
 	//敵は右上が初期位置
 	unitdata[1].UnitID = Unit_Enemy;
 	unitdata[1].EndFlag = 0;
-	unitdata[1].posx = MapSizeX - 1;
-	unitdata[1].posy = 0;
+	//unitdata[1].posx = MapSizeX - 1;
+	//unitdata[1].posy = 0;
+
+	unitdata[1].posx = 5;
+	unitdata[1].posy = 5;
+
 	unitdata[1].isDead = 0;
 	unitdata[1].Hp = 10;
 	unitdata[1].atk = 2;
@@ -384,6 +388,11 @@ void moveGame1Scene() {
 			}
 		}
 
+		//ボタン２でキャンセル
+		if ((EdgeInput & PAD_INPUT_2)) {
+			GameMode = gamemode_playerturn;
+		}
+
 		break;
 
 	case gamemode_enemyturn:
@@ -461,7 +470,7 @@ void renderGame1Scene(void){
 	}
 
 	//カーソルの表示
-	DrawGraph(BaseX + cursol_x * ImgSize, BaseY + cursol_y * ImgSize, img_cursol,true);
+	DrawGraph(BaseX + cursol_x * ImgSize, BaseY + cursol_y * ImgSize, img_cursol, true);
 
 	//操作の表示
 	switch (GameMode) {
@@ -501,8 +510,17 @@ void renderGame1Scene(void){
 			}
 		}
 
-		//カーソルの表示
-		DrawGraph(MenuBaseX - 40, MenuBaseY + MenuChoice * 50, img_Arrrowcursol, true);
+		break;
+	case gamemode_playerUnitAttackChoice:
+		DrawFormatString(0, 0, Cr_White, "ボタン２でキャンセル");
+		//攻撃できる範囲を表示する
+		for (int i = 0; i < MapSizeX; i++) {
+			for (int j = 0; j < MapSizeY; j++) {
+				if (MapCheckData[i][j] == 1) {
+					DrawFormatString(BaseX + i * ImgSize, BaseY + j * ImgSize, Cr_Green, "□");
+				}
+			}
+		}
 
 		break;
 	case gamemode_enemyturn:
